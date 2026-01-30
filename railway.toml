@@ -84,7 +84,7 @@ DENO_RUNTIME_URL = { value = "http://${{deno.RAILWAY_PRIVATE_DOMAIN}}:7133" }
 
 # Project Configuration
 APP_KEY = { generator = "secret", length = 8 }
-ACCESS_API_KEY = "ik_" + { generator = "secret", length = 32 } 
+ACCESS_API_KEY = { generator = "secret", length = 32 }
 
 # Security
 JWT_SECRET = { generator = "secret", length = 64 }

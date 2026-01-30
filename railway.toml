@@ -1,0 +1,136 @@
+# Railway Template Configuration for InsForge
+# Deploy a complete InsForge stack: PostgreSQL, PostgREST, InsForge, Deno Runtime
+#
+# All images are pre-built and hosted on GitHub Container Registry for fast deployment.
+
+# ============================================
+# PostgreSQL Database Service
+# ============================================
+[services.postgres]
+name = "postgres"
+# Pre-built image with pgvector, pg_cron, pg_net, pgcrypto extensions
+# and init scripts baked in
+image = "ghcr.io/insforge/postgres-all:latest"
+
+[services.postgres.deploy]
+healthcheckTimeout = 300
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 10
+
+[[services.postgres.volumes]]
+mountPath = "/var/lib/postgresql/data"
+
+[services.postgres.env]
+POSTGRES_USER = { default = "postgres" }
+POSTGRES_PASSWORD = { generator = "secret" }
+POSTGRES_DB = { default = "insforge" }
+# Encryption key for database-level encryption (shared with insforge service)
+ENCRYPTION_KEY = { value = "${{insforge.ENCRYPTION_KEY}}" }
+
+# ============================================
+# PostgREST API Gateway Service
+# ============================================
+[services.postgrest]
+name = "postgrest"
+image = "postgrest/postgrest:v12.2.12"
+
+[services.postgrest.deploy]
+healthcheckPath = "/"
+healthcheckTimeout = 60
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 5
+
+[services.postgrest.env]
+PGRST_DB_URI = { value = "postgres://${{postgres.POSTGRES_USER}}:${{postgres.POSTGRES_PASSWORD}}@${{postgres.RAILWAY_PRIVATE_DOMAIN}}:5432/${{postgres.POSTGRES_DB}}" }
+PGRST_DB_SCHEMA = { default = "public" }
+PGRST_DB_ANON_ROLE = { default = "anon" }
+PGRST_JWT_SECRET = { value = "${{insforge.JWT_SECRET}}" }
+PGRST_DB_POOL = { default = "50" }
+PGRST_DB_POOL_TIMEOUT = { default = "10" }
+PGRST_DB_POOL_ACQUISITION_TIMEOUT = { default = "10" }
+PGRST_MAX_ROWS = { default = "1000" }
+PGRST_DB_CHANNEL_ENABLED = { default = "true" }
+PGRST_DB_CHANNEL = { default = "pgrst" }
+PGRST_SERVER_PORT = { default = "3000" }
+
+# ============================================
+# InsForge Main Application Service
+# ============================================
+[services.insforge]
+name = "insforge"
+image = "ghcr.io/insforge/insforge-oss:v1.5.0"
+
+[services.insforge.deploy]
+healthcheckPath = "/api/health"
+healthcheckTimeout = 120
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 5
+
+[services.insforge.env]
+PORT = { default = "7130" }
+PROJECT_ROOT = { default = "/app" }
+
+# Database Configuration
+POSTGRES_HOST = { value = "${{postgres.RAILWAY_PRIVATE_DOMAIN}}" }
+POSTGRES_PORT = { default = "5432" }
+POSTGRES_DB = { value = "${{postgres.POSTGRES_DB}}" }
+POSTGRES_USER = { value = "${{postgres.POSTGRES_USER}}" }
+POSTGRES_PASSWORD = { value = "${{postgres.POSTGRES_PASSWORD}}" }
+DATABASE_URL = { value = "postgresql://${{postgres.POSTGRES_USER}}:${{postgres.POSTGRES_PASSWORD}}@${{postgres.RAILWAY_PRIVATE_DOMAIN}}:5432/${{postgres.POSTGRES_DB}}" }
+POSTGREST_BASE_URL = { value = "http://${{postgrest.RAILWAY_PRIVATE_DOMAIN}}:3000" }
+
+# Deno Runtime
+DENO_RUNTIME_URL = { value = "http://${{deno.RAILWAY_PRIVATE_DOMAIN}}:7133" }
+
+# Project Configuration
+APP_KEY = { generator = "secret", length = 8 }
+ACCESS_API_KEY = "ik_" + { generator = "secret", length = 32 } 
+
+# Security
+JWT_SECRET = { generator = "secret", length = 64 }
+ENCRYPTION_KEY = { generator = "secret", length = 32 }
+
+# Admin Configuration
+ADMIN_EMAIL = { default = "admin@example.com", description = "Admin user email" }
+ADMIN_PASSWORD = { generator = "secret", length = 16, description = "Admin user password" }
+
+# Public URL (set automatically by Railway)
+VITE_API_BASE_URL = { value = "https://${{RAILWAY_PUBLIC_DOMAIN}}" }
+API_BASE_URL = { value = "https://${{RAILWAY_PUBLIC_DOMAIN}}" }
+
+# Optional: OAuth Configuration
+GOOGLE_CLIENT_ID = { default = "", description = "Google OAuth Client ID" }
+GOOGLE_CLIENT_SECRET = { default = "", description = "Google OAuth Client Secret" }
+GITHUB_CLIENT_ID = { default = "", description = "GitHub OAuth Client ID" }
+GITHUB_CLIENT_SECRET = { default = "", description = "GitHub OAuth Client Secret" }
+
+# ============================================
+# Deno Serverless Runtime Service
+# ============================================
+[services.deno]
+name = "deno"
+# Pre-built image with function server baked in
+image = "ghcr.io/insforge/deno-runtime:latest"
+
+[services.deno.deploy]
+healthcheckPath = "/health"
+healthcheckTimeout = 60
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 5
+
+[services.deno.env]
+PORT = { default = "7133" }
+DENO_ENV = { default = "production" }
+WORKER_TIMEOUT_MS = { default = "60000" }
+
+# Database Configuration
+POSTGRES_HOST = { value = "${{postgres.RAILWAY_PRIVATE_DOMAIN}}" }
+POSTGRES_PORT = { default = "5432" }
+POSTGRES_DB = { value = "${{postgres.POSTGRES_DB}}" }
+POSTGRES_USER = { value = "${{postgres.POSTGRES_USER}}" }
+POSTGRES_PASSWORD = { value = "${{postgres.POSTGRES_PASSWORD}}" }
+POSTGREST_BASE_URL = { value = "http://${{postgrest.RAILWAY_PRIVATE_DOMAIN}}:3000" }
+
+# Security
+JWT_SECRET = { value = "${{insforge.JWT_SECRET}}" }
+ENCRYPTION_KEY = { value = "${{insforge.ENCRYPTION_KEY}}" }

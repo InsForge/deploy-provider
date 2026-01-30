@@ -1,0 +1,212 @@
+
+services:
+  postgres:
+    image: ghcr.io/insforge/postgres:v15.13.2
+    container_name: insforge-postgres
+    restart: unless-stopped
+    command: postgres -c config_file=/etc/postgresql/postgresql.conf -c app.encryption_key='${ENCRYPTION_KEY:-${JWT_SECRET:-dev-secret-please-change-in-production}}'
+    deploy:
+      resources:
+        limits:
+          memory: ${POSTGRES_MEMORY:-150M}
+          cpus: '0.5'
+        reservations:
+          memory: 30M
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER:-postgres}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-postgres}
+      - POSTGRES_DB=${POSTGRES_DB:-insforge}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./docker-init/db/db-init.sql:/docker-entrypoint-initdb.d/01-init.sql
+      - ./docker-init/db/jwt.sql:/docker-entrypoint-initdb.d/02-jwt.sql
+      - ./docker-init/db/logs.sql:/docker-entrypoint-initdb.d/03-logs.sql
+      - ./docker-init/db/postgresql.conf:/etc/postgresql/postgresql.conf
+    ports:
+      - "5432:5432"
+    networks:
+      - insforge-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+    # Add logging configuration
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    # Ensure proper shutdown
+    stop_grace_period: 30s
+    stop_signal: SIGINT
+
+  postgrest:
+    image: postgrest/postgrest:v12.2.12
+    container_name: insforge-postgrest
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: ${POSTGREST_MEMORY:-50M}
+          cpus: '0.3'
+        reservations:
+          memory: 20M
+    environment:
+      PGRST_DB_URI: postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-insforge}
+      PGRST_OPENAPI_SERVER_PROXY_URI: http://localhost:3000
+      PGRST_DB_SCHEMA: public
+      PGRST_DB_ANON_ROLE: anon
+      PGRST_JWT_SECRET: ${JWT_SECRET}
+      # Connection pool settings (CRITICAL for stability)
+      PGRST_DB_POOL: 50                    # Max connections in pool (default: 10)
+      PGRST_DB_POOL_TIMEOUT: 10            # Seconds to wait for connection (default: 10)
+      PGRST_DB_POOL_ACQUISITION_TIMEOUT: 10 # Max time to acquire connection
+      # Server performance settings
+      PGRST_MAX_ROWS: 1000                 # Limit result set size
+      # Enable schema reloading via NOTIFY
+      PGRST_DB_CHANNEL_ENABLED: true
+      PGRST_DB_CHANNEL: pgrst
+    ports:
+      - "5430:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - insforge-network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  insforge:
+    container_name: insforge
+    image: ghcr.io/insforge/insforge-oss:${INSFORGE_OSS_VER:-v1.5.0}
+    working_dir: /app
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: ${INSFORGE_MEMORY:-150M}
+          cpus: '0.5'
+        reservations:
+          memory: 50M
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "7130:7130"
+      - "7131:7131"
+    environment:
+      - PORT=7130
+      - PROJECT_ROOT=/app
+      - API_BASE_URL=${VITE_API_BASE_URL:-}
+      - VITE_API_BASE_URL=${VITE_API_BASE_URL:-}
+      - JWT_SECRET=${JWT_SECRET:-dev-secret-change-in-production}
+      - ADMIN_EMAIL=${ADMIN_EMAIL:-admin@example.com}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-change-this-password}
+      # PostgreSQL connection
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_DB=${POSTGRES_DB:-insforge}
+      - POSTGRES_USER=${POSTGRES_USER:-postgres}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-postgres}
+      - POSTGREST_BASE_URL=http://postgrest:3000
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-insforge}
+      - CLOUD_API_HOST=${CLOUD_API_HOST}
+      # Deno Runtime URL
+      - DENO_RUNTIME_URL=http://deno:7133
+      # Deno Subhosting Configuration
+      - DENO_SUBHOSTING_TOKEN=${DENO_SUBHOSTING_TOKEN:-}
+      - DENO_SUBHOSTING_ORG_ID=${DENO_SUBHOSTING_ORG_ID:-}
+      # OAuth Configuration
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID:-}
+      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET:-}
+      - GOOGLE_REDIRECT_URI=${GOOGLE_REDIRECT_URI:-http://localhost:7130/api/auth/v1/callback}
+      - GITHUB_CLIENT_ID=${GITHUB_CLIENT_ID:-}
+      - GITHUB_CLIENT_SECRET=${GITHUB_CLIENT_SECRET:-}
+      - GITHUB_REDIRECT_URI=${GITHUB_REDIRECT_URI:-http://localhost:7130/api/auth/v1/callback}
+      # Storage Configuration
+      - AWS_S3_BUCKET=${AWS_S3_BUCKET:-insforge-storage}
+      - AWS_REGION=us-east-2
+      - AWS_INSTANCE_PROFILE_NAME=${AWS_INSTANCE_PROFILE_NAME}
+      - AWS_CLOUDFRONT_URL=${AWS_CLOUDFRONT_URL:-}
+      - AWS_CLOUDFRONT_KEY_PAIR_ID=${AWS_CLOUDFRONT_KEY_PAIR_ID}
+      - AWS_CLOUDFRONT_PRIVATE_KEY=${AWS_CLOUDFRONT_PRIVATE_KEY}
+      # Multi-tenant Cloud Configuration
+      - DEPLOYMENT_ID=${DEPLOYMENT_ID:-}
+      - PROJECT_ID=${PROJECT_ID:-}
+      - APP_KEY=${APP_KEY:-}
+      - ACCESS_API_KEY=${ACCESS_API_KEY:-}
+      # Analytics (CloudWatch)
+      - ANALYTICS_PROVIDER=${ANALYTICS_PROVIDER:-cloudwatch}
+      - CLOUDWATCH_LOG_GROUP=${CLOUDWATCH_LOG_GROUP}
+      - HOSTNAME_OVERRIDE=${HOSTNAME_OVERRIDE:-}
+    networks:
+      - insforge-network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  deno:
+    image: denoland/deno:alpine-2.0.6
+    container_name: insforge-deno
+    working_dir: /app
+    deploy:
+      resources:
+        limits:
+          memory: ${DENO_MEMORY:-130M}
+          cpus: '0.3'
+        reservations:
+          memory: 30M
+    depends_on:
+      - postgres
+      - postgrest
+    ports:
+      - "7133:7133"
+    environment:
+      - DENO_ENV=${DENO_ENV:-development}
+      - DENO_DIR=/deno-dir
+      - WORKER_TIMEOUT_MS=${WORKER_TIMEOUT_MS:-60000}
+      - ENCRYPTION_KEY=${ENCRYPTION_KEY}
+      - JWT_SECRET=${JWT_SECRET:-dev-secret-please-change-in-production}
+      # PostgreSQL connection
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_DB=${POSTGRES_DB:-insforge}
+      - POSTGRES_USER=${POSTGRES_USER:-postgres}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-postgres}
+      - POSTGREST_BASE_URL=http://postgrest:3000
+    volumes:
+      - ./functions:/app/functions
+      - deno_cache:/deno-dir
+    command: >
+      sh -c "
+        echo 'Downloading Deno dependencies...' &&
+        deno cache functions/server.ts &&
+        echo 'Starting Deno server...' &&
+        # Minimal permissions: net (server), env (config), read (worker template only)
+        deno run --allow-net --allow-env --allow-read=./functions/worker-template.js --watch functions/server.ts
+      "
+    restart: unless-stopped
+    networks:
+      - insforge-network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  postgres-data:
+    driver: local
+  deno_cache:
+    driver: local
+
+networks:
+  insforge-network:
+    driver: bridge

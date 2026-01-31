@@ -16,8 +16,10 @@ COPY docker-init/db/logs.sql /docker-entrypoint-initdb.d/03-logs.sql
 COPY docker-init/db/postgresql.conf /etc/postgresql/postgresql.conf
 
 # Set default environment variables
+# Use subdirectory for PGDATA to avoid "lost+found" issue on mounted volumes
 ENV POSTGRES_USER=postgres \
-    POSTGRES_DB=insforge
+    POSTGRES_DB=insforge \
+    PGDATA=/var/lib/postgresql/data/pgdata
 
 # Create entrypoint script that passes encryption key to postgres
 # This allows ENCRYPTION_KEY to be set via environment variable at runtime
